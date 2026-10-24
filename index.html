@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brocante Scan x3</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white p-4 min-h-screen flex flex-col justify-between">
+  <div>
+    <h1 class="text-xl font-bold text-center mb-1">🎯 Brocante Scanner</h1>
+    <p class="text-center text-xs text-yellow-400 font-semibold mb-4">Objectif Rentabilité : x3 Minimum</p>
+
+    <!-- Bouton Prise de photo -->
+    <label class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 p-4 rounded-xl flex items-center justify-center font-bold cursor-pointer text-lg mb-4 shadow-lg">
+      📸 Scanner l'étiquette
+      <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden">
+    </label>
+
+    <!-- Zone de texte détectée -->
+    <div class="mb-4">
+      <div class="flex gap-2">
+        <input id="searchQuery" type="text" placeholder="Référence vêtement..." 
+               class="flex-1 p-2 bg-gray-800 rounded text-sm text-yellow-300 border border-gray-700">
+        <button id="manualSearchBtn" class="bg-gray-700 px-3 rounded text-sm font-semibold">
+          🔎
+        </button>
+      </div>
+    </div>
+
+    <!-- Message de chargement -->
+    <div id="status" class="hidden text-center py-4 text-yellow-400 font-semibold animate-pulse text-sm"></div>
+
+    <!-- Résultat -->
+    <div id="resultCard" class="hidden p-5 rounded-2xl border mt-2 shadow-2xl text-center">
+      <p class="text-xs uppercase font-bold tracking-wider text-gray-400 mb-1">Prix maximum à payer</p>
+      
+      <!-- GROS PRIX MAX AFFICHÉ -->
+      <div id="maxBuyPrice" class="text-5xl font-black my-2"></div>
+      
+      <p id="conseil" class="text-xs font-semibold mb-4"></p>
+
+      <div class="border-t border-gray-700 pt-3 grid grid-cols-2 gap-2 text-left text-xs text-gray-300">
+        <div>
+          <span class="text-gray-500 block">Revente estimée :</span>
+          <strong id="resalePrice" class="text-sm text-white"></strong>
+        </div>
+        <div>
+          <span class="text-gray-500 block">Vitesse (STR) :</span>
+          <strong id="str" class="text-sm text-white"></strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('cameraInput');
+    const status = document.getElementById('status');
+    const queryInput = document.getElementById('searchQuery');
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      status.classList.remove('hidden');
+      status.textContent = "Lecture de l'étiquette...";
+
+      try {
+        const result = await Tesseract.recognize(file, 'eng+fra');
+        const lines = result.data.lines
+          .map(l => l.text.trim())
+          .filter(t => t.length > 2 && !t.includes('%') && !t.includes('COTTON'));
+        
+        const cleanQuery = lines.slice(0, 3).join(' ').replace(/[^a-zA-Z0-9\s-]/g, '').trim();
+        queryInput.value = cleanQuery || "Article inconnu";
+        lancerRecherche(queryInput.value);
+      } catch (err) {
+        status.textContent = "Erreur lecture. Tapez la référence manuellement.";
+      }
+    });
+
+    document.getElementById('manualSearchBtn').addEventListener('click', () => {
+      lancerRecherche(queryInput.value);
+    });
+
+    async function lancerRecherche(query) {
+      if (!query) return;
+      
+      status.classList.remove('hidden');
+      status.textContent = "Calcul du prix max sur eBay...";
+      document.getElementById('resultCard').classList.add('hidden');
+
+      try {
+        const res = await fetch(`/.netlify/functions/ebay-free?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        status.classList.add('hidden');
+        afficherResultat(data);
+      } catch (err) {
+        status.textContent = "Erreur de connexion.";
+      }
+    }
+
+    function afficherResultat(data) {
+      const card = document.getElementById('resultCard');
+      const maxPriceEl = document.getElementById('maxBuyPrice');
+      const conseilEl = document.getElementById('conseil');
+
+      card.classList.remove('hidden');
+      document.getElementById('resalePrice').textContent = data.medianPrice + " €";
+      document.getElementById('str').textContent = data.str + "% (" + data.soldCount + " vendus)";
+
+      if (data.maxPrice <= 0 || data.soldCount === 0) {
+        maxPriceEl.textContent = "0 €";
+        maxPriceEl.className = "text-5xl font-black my-2 text-red-500";
+        conseilEl.textContent = "🔴 À LAISSER (Pas de demande ou prix trop bas)";
+        card.className = "p-5 rounded-2xl border border-red-500 bg-red-950/30 text-center";
+      } else {
+        maxPriceEl.textContent = data.maxPrice + " € MAX";
+        maxPriceEl.className = "text-5xl font-black my-2 text-green-400";
+        
+        if (data.str >= 40) {
+          conseilEl.textContent = "🟢 ACHÈTE si le vendeur demande " + data.maxPrice + " € ou moins (Vente rapide !)";
+          card.className = "p-5 rounded-2xl border border-green-500 bg-green-950/30 text-center";
+        } else {
+          conseilEl.textContent = "🟡 NÉGOCIE sous " + data.maxPrice + " € (Attention, vente un peu lente)";
+          card.className = "p-5 rounded-2xl border border-yellow-500 bg-yellow-950/30 text-center";
+        }
+      }
+    }
+  </script>
+</body>
+</html>
